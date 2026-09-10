@@ -1,0 +1,47 @@
+Inquira System Architecture Document
+=====================================
+
+Chapter 1: Overview
+-------------------
+
+Inquira is an enterprise-grade Agentic Retrieval-Augmented Generation (RAG) platform designed for private knowledge-base management, multi-format document ingestion, and citation-grounded question answering.
+
+The platform is built using FastAPI for the backend API, PostgreSQL for relational data storage, Qdrant for vector search, Redis for caching and message brokering, and Celery for asynchronous task processing.
+
+Chapter 2: Hybrid Retrieval Pipeline
+-------------------------------------
+
+Inquira implements a 5-technique hybrid retrieval pipeline that combines multiple search strategies to maximize precision and recall:
+
+1. HyDE (Hypothetical Document Embeddings): Generates a plausible hypothetical answer using a fast LLM. The hypothetical answer is then embedded to capture target answer semantics, even when the user query is terse or ambiguous.
+
+2. Dense Vector Search (Qdrant): Performs cosine similarity search over indexed document chunks using high-dimensional dense embeddings. All searches are scoped by user_id and knowledge_base_id payload filters to enforce strict data isolation.
+
+3. BM25 Sparse Lexical Search: Uses token frequency-inverse document frequency (TF-IDF) scoring to guarantee exact keyword matching for entity names, serial numbers, product codes, and technical acronyms.
+
+4. Reciprocal Rank Fusion (RRF): Combines the ranked results from dense and sparse searches using the formula RRF_Score(d) = sum(1 / (k + rank(d))) with a default smoothing constant k = 60. This approach normalizes the disparity between cosine distance scores and unbounded BM25 scores without requiring fragile score calibration.
+
+5. Cross-Encoder Re-Ranking: The top 25 fused candidates are evaluated by passing (query, chunk_text) pairs jointly into a cross-attention transformer model (cross-encoder/ms-marco-MiniLM-L-6-v2). Results are filtered to the top 5 chunks with a minimum relevance score threshold of 0.35.
+
+Chapter 3: LangGraph Workflow
+-----------------------------
+
+The agentic workflow is implemented as a LangGraph StateGraph with three stages:
+
+Stage 1 - Query Planning: Classifies the user query intent (RAG vs conversational vs out-of-scope), performs multi-hop query decomposition for complex questions, resolves coreferences against conversation history, and generates HyDE documents.
+
+Stage 2 - Hybrid Retrieval: Executes the 5-technique pipeline described above, merges and re-ranks results, and applies context window expansion by fetching neighboring chunks for continuity.
+
+Stage 3 - Citation-Grounded Generation: Synthesizes answers with strict attribution markers [Doc: filename, Page: p, Chunk: c]. An automated verification node checks semantic entailment between each generated claim and its referenced source chunk. If the grounding score falls below 0.85, the system triggers a self-correction loop.
+
+Chapter 4: Security and Authentication
+---------------------------------------
+
+Inquira uses JWT-based authentication with bcrypt password hashing. Access tokens expire after 60 minutes, and refresh tokens are valid for 7 days. All API endpoints except registration and login require a valid Bearer token.
+
+Rate limiting is enforced via SlowAPI with configurable limits per endpoint. CORS middleware allows configurable origin whitelisting for the Next.js frontend.
+
+Chapter 5: Deployment
+---------------------
+
+The application is containerized using Docker with a docker-compose.yml that orchestrates PostgreSQL 16, Redis 7, Qdrant v1.11, the FastAPI backend, and Celery workers. Health checks are configured for all critical services.

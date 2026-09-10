@@ -1,0 +1,42 @@
+[
+  {
+    "id": "q1",
+    "query": "What are the 5 techniques used in Inquira's hybrid retrieval pipeline?",
+    "ground_truth_context": "Inquira's hybrid retrieval pipeline comprises HyDE (Hypothetical Document Embeddings), Qdrant dense vector search, BM25 sparse lexical search, Reciprocal Rank Fusion (RRF), and Cross-Encoder re-ranking.",
+    "ground_truth_answer": "The 5 techniques are HyDE (Hypothetical Document Embeddings), Qdrant dense vector retrieval, BM25 sparse lexical retrieval, Reciprocal Rank Fusion (RRF), and Cross-Encoder re-ranking.",
+    "relevant_doc": "architecture.pdf",
+    "expected_page": 1
+  },
+  {
+    "id": "q2",
+    "query": "What is the RRF formula and default smoothing parameter k used in Inquira?",
+    "ground_truth_context": "Reciprocal Rank Fusion calculates score(d) = sum(1 / (k + rank_m(d))) with default smoothing parameter k = 60.",
+    "ground_truth_answer": "The RRF score for a document d is the sum of 1/(k + rank(d)) across dense and sparse ranked lists with a default constant k = 60.",
+    "relevant_doc": "architecture.pdf",
+    "expected_page": 2
+  },
+  {
+    "id": "q3",
+    "query": "How is multi-tenancy and data isolation enforced in Qdrant vector storage?",
+    "ground_truth_context": "All vector points store user_id and knowledge_base_id in the payload, and search queries strictly apply payload filter conditions matching the authenticated user and target knowledge base.",
+    "ground_truth_answer": "Data isolation is enforced by indexing user_id and knowledge_base_id as payload keywords in Qdrant and applying strict payload filters on every query.",
+    "relevant_doc": "security.pdf",
+    "expected_page": 1
+  },
+  {
+    "id": "q4",
+    "query": "What are the 3 stages in Inquira's LangGraph workflow?",
+    "ground_truth_context": "The 3 stages are Stage 1: Query Planning & HyDE Expansion, Stage 2: Hybrid Retrieval & Re-ranking, and Stage 3: Grounded Synthesis & Citation Verification.",
+    "ground_truth_answer": "The three stages are Query Planning with HyDE expansion, Hybrid Retrieval with Cross-Encoder re-ranking, and Grounded Generation with Citation Verification.",
+    "relevant_doc": "orchestration.pdf",
+    "expected_page": 1
+  },
+  {
+    "id": "q5",
+    "query": "What is the Celery task retry strategy and failure handling for document ingestion?",
+    "ground_truth_context": "Celery tasks retry up to 3 times with exponential backoff on transient errors. Permanent failures update document status to FAILED and log traces to application_logs.",
+    "ground_truth_answer": "Tasks retry up to 3 times with exponential backoff on transient errors, and on exhaustion the document status is marked FAILED and logged in application_logs.",
+    "relevant_doc": "worker.pdf",
+    "expected_page": 2
+  }
+]

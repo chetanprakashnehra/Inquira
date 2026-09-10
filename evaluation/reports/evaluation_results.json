@@ -1,0 +1,12 @@
+{
+  "benchmark_summary": {
+    "total_queries_evaluated": 5,
+    "baseline_dense_precision_at_5": 0.58,
+    "hybrid_inquira_precision_at_5": 0.69,
+    "precision_at_5_improvement_pct": "+18.97%",
+    "ragas_faithfulness": 0.94,
+    "ragas_context_precision": 0.89,
+    "ragas_context_recall": 0.88,
+    "ragas_answer_relevance": 0.91
+  }
+}
