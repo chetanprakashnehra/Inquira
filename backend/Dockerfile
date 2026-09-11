@@ -1,51 +1,27 @@
-# Stage 1: Build dependencies
-FROM python:3.12-slim AS builder
-
-WORKDIR /build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Stage 2: Runtime
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install only runtime system deps
+# Install system dependencies for PostgreSQL, build tools, and networking
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
+    build-essential \
+    libpq-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed Python packages from builder
-COPY --from=builder /install /usr/local
+# Install python dependencies directly into system environment
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Create non-root user with a real home directory
-RUN addgroup --system --gid 1001 inquira && \
-    adduser --system --uid 1001 --ingroup inquira --home /home/inquira inquira
+# Copy application source code
+COPY . .
 
-ENV HOME=/home/inquira
-ENV HF_HOME=/home/inquira/.cache
+# Set up runtime directories and environment
+RUN mkdir -p /app/uploads
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# Copy application source
-COPY . .
-
-# Create directories owned by app user
-RUN mkdir -p /app/uploads /home/inquira/.cache && \
-    chown -R inquira:inquira /app /home/inquira
-
-USER inquira
-
 EXPOSE 10000
 
-# Direct uvicorn startup: lightweight, no Gunicorn IPC/heartbeat overhead, dynamic port
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --log-level info"]
-
-
+# Start FastAPI server directly using python -m uvicorn on Render's dynamic port
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --log-level info"]
