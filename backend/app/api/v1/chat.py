@@ -19,10 +19,10 @@ from app.schemas.chat import (
     ChatQueryRequest,
     Citation,
 )
-from app.rag.graph import rag_graph
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/chat", tags=["Chat & RAG"])
 
@@ -160,6 +160,7 @@ async def query_chat_session(
 
         # Execute LangGraph workflow
         try:
+            from app.rag.graph import rag_graph
             final_state = await rag_graph.ainvoke(initial_state)
             
             # Send status update for retrieved sources
@@ -218,7 +219,9 @@ async def query_chat_session(
             "retry_count": 0,
             "final_output": ""
         }
+        from app.rag.graph import rag_graph
         final_state = await rag_graph.ainvoke(initial_state)
+
         final_text = final_state.get("final_output", "")
         citations = final_state.get("citations", [])
 

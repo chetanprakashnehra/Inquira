@@ -21,9 +21,9 @@ from app.schemas.document import (
     DocumentUploadResponse,
     DocumentChunkResponse,
 )
-from app.workers.tasks import process_document, delete_document_task
 
 logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -101,9 +101,11 @@ async def upload_documents(
         await db.refresh(doc)
 
     # Dispatch Celery tasks or fallback to background tasks if Celery not connected
+    from app.workers.tasks import process_document
     for doc_id_str in doc_ids_to_process:
         try:
             process_document.delay(doc_id_str)
+
         except Exception as e:
             logger.warning(f"Could not dispatch to Celery broker ({e}). Running via FastAPI BackgroundTasks.")
             from app.workers.tasks import _async_process_document
@@ -230,8 +232,10 @@ async def delete_document(
     await db.commit()
 
     # Dispatch deletion task for vector cleanup and disk cleanup
+    from app.workers.tasks import delete_document_task
     try:
         delete_document_task.delay(doc_id_str, file_path)
+
     except Exception:
         delete_document_task(doc_id_str, file_path)
 
