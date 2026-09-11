@@ -80,48 +80,57 @@ def create_application() -> FastAPI:
 
     @app.get('/health', tags=['Health'])
     async def health_check():
+        import asyncio
         checks = {'api': 'ok'}
         overall = 'healthy'
         
-        # Check database
+        # Check database with strict timeout
         try:
             from app.core.database import AsyncSessionLocal
-            async with AsyncSessionLocal() as session:
-                await session.execute(text('SELECT 1'))
+            async def _check_db():
+                async with AsyncSessionLocal() as session:
+                    await session.execute(text('SELECT 1'))
+            await asyncio.wait_for(_check_db(), timeout=5.0)
             checks['database'] = 'ok'
         except Exception as e:
             checks['database'] = f'error: {str(e)[:100]}'
             overall = 'degraded'
         
-        # Check Redis
+        # Check Redis with strict timeout
         try:
             from app.core.redis import get_redis
-            r = await get_redis()
-            if r:
-                await r.ping()
-                checks['redis'] = 'ok'
-            else:
-                checks['redis'] = 'unavailable'
-                if settings.ENVIRONMENT == 'production':
-                    overall = 'degraded'
+            async def _check_redis():
+                r = await get_redis()
+                if r:
+                    await r.ping()
+                    return 'ok'
+                return 'unavailable'
+            res = await asyncio.wait_for(_check_redis(), timeout=3.0)
+            checks['redis'] = res
+            if res != 'ok' and settings.ENVIRONMENT == 'production':
+                overall = 'degraded'
         except Exception as e:
             checks['redis'] = f'error: {str(e)[:100]}'
             overall = 'degraded'
         
-        # Check Qdrant
+        # Check Qdrant in worker thread with timeout to avoid event loop blocking
         try:
             from app.rag.retrieval.qdrant_client import qdrant_store
-            info = qdrant_store.client.get_collections()
+            await asyncio.wait_for(
+                asyncio.to_thread(lambda: qdrant_store.client.get_collections()),
+                timeout=5.0
+            )
             checks['qdrant'] = 'ok'
         except Exception as e:
             checks['qdrant'] = f'error: {str(e)[:100]}'
             overall = 'degraded'
         
-        status_code = 200 if overall == 'healthy' else 503
+        # Return 200 with status report so cloud proxies don't terminate the service
         return JSONResponse(
             content={'status': overall, 'environment': settings.ENVIRONMENT, 'version': settings.VERSION, 'checks': checks},
-            status_code=status_code
+            status_code=200
         )
+
 
     return app
 

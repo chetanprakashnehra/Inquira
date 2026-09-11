@@ -11,11 +11,12 @@ db_url = settings.DATABASE_URL
 # asyncpg doesn't support query params like sslmode, channel_binding, etc.
 # Strip them from the URL and configure SSL via connect_args instead.
 _needs_ssl = False
-if "asyncpg" in db_url and "?" in db_url:
-    if "sslmode=require" in db_url or "ssl=require" in db_url:
+if "asyncpg" in db_url:
+    # Auto-enable SSL for Neon or any non-localhost database
+    if "sslmode=require" in db_url or "ssl=require" in db_url or "neon.tech" in db_url or "localhost" not in db_url:
         _needs_ssl = True
-    # Remove all query parameters — asyncpg handles SSL via connect_args
-    db_url = db_url.split("?")[0]
+    if "?" in db_url:
+        db_url = db_url.split("?")[0]
 
 # Check if asyncpg is missing and fallback to aiosqlite for local development/testing
 if "asyncpg" in db_url:
@@ -28,20 +29,24 @@ if "asyncpg" in db_url:
         else:
             raise RuntimeError("asyncpg driver not installed, but required in non-development environments.")
 
-# Construct async engine with appropriate pool arguments
+# Construct async engine with appropriate pool arguments and timeouts
 engine_kwargs = {"echo": False, "future": True}
 if "sqlite" in db_url:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
     engine_kwargs["pool_pre_ping"] = True
-    engine_kwargs["pool_size"] = 10
-    engine_kwargs["max_overflow"] = 20
+    engine_kwargs["pool_size"] = 5
+    engine_kwargs["max_overflow"] = 10
+    engine_kwargs["pool_timeout"] = 10.0
+    connect_args = {"timeout": 10.0}
     if _needs_ssl:
         import ssl as _ssl
         ssl_ctx = _ssl.create_default_context()
-        engine_kwargs["connect_args"] = {"ssl": ssl_ctx}
+        connect_args["ssl"] = ssl_ctx
+    engine_kwargs["connect_args"] = connect_args
 
 async_engine = create_async_engine(db_url, **engine_kwargs)
+
 
 
 AsyncSessionLocal = async_sessionmaker(
