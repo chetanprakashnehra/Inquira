@@ -25,22 +25,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
 
-# Create non-root user
+# Create non-root user with a real home directory
 RUN addgroup --system --gid 1001 inquira && \
-    adduser --system --uid 1001 --ingroup inquira inquira
+    adduser --system --uid 1001 --ingroup inquira --home /home/inquira inquira
+
+ENV HOME=/home/inquira
+ENV HF_HOME=/home/inquira/.cache
 
 # Copy application source
 COPY . .
 
-# Create upload directory owned by app user
-RUN mkdir -p /app/uploads && chown -R inquira:inquira /app/uploads
+# Create directories owned by app user
+RUN mkdir -p /app/uploads /home/inquira/.cache && \
+    chown -R inquira:inquira /app /home/inquira
 
 USER inquira
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Use gunicorn with dynamic port and memory-safe concurrency for cloud hosts (e.g. Render 512MB)
+CMD ["sh", "-c", "gunicorn app.main:app -w ${WEB_CONCURRENCY:-1} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8000} --access-logfile - --error-logfile -"]
 
-# Use gunicorn with uvicorn workers for production
-CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
