@@ -23,5 +23,6 @@ ENV PYTHONPATH=/app
 
 EXPOSE 10000
 
-# Start FastAPI server directly using python -m uvicorn on Render's dynamic port
-CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --log-level info"]
+# Start FastAPI server using entrypoint script with explicit startup tracing
+CMD ["python", "entrypoint.py"]
+
