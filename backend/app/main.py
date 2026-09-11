@@ -56,14 +56,16 @@ def create_application() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # 2. Add CORS Middleware
+    # 2. Add CORS Middleware (supports configured origins and all Vercel domains)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
+        allow_origin_regex=r"https://.*\.vercel\.app",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
 
     # 3. Register API Routers
     app.include_router(api_router, prefix="/api")
