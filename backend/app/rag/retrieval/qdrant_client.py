@@ -13,27 +13,34 @@ class QdrantStore:
     def __init__(self):
         self.collection_name = settings.QDRANT_COLLECTION_NAME
         self.dense_dim = settings.DENSE_EMBEDDING_DIM
-        self._init_client()
+        self._client = None
+
+    @property
+    def client(self) -> QdrantClient:
+        if self._client is None:
+            self._init_client()
+        return self._client
 
     def _init_client(self):
         try:
             if settings.QDRANT_URL.startswith("http"):
-                self.client = QdrantClient(
+                self._client = QdrantClient(
                     url=settings.QDRANT_URL,
                     api_key=settings.QDRANT_API_KEY,
                     timeout=5.0,
                     check_compatibility=False
                 )
             else:
-                self.client = QdrantClient(":memory:")
+                self._client = QdrantClient(":memory:")
             self._ensure_collection()
         except Exception as e:
             if settings.ENVIRONMENT == "development":
                 logger.warning(f"Could not connect to Qdrant at {settings.QDRANT_URL}: {e}. Initializing in-memory fallback.")
-                self.client = QdrantClient(":memory:")
+                self._client = QdrantClient(":memory:")
                 self._ensure_collection()
             else:
                 raise RuntimeError(f"Could not connect to Qdrant in production: {e}")
+
 
     def _ensure_collection(self):
         """Ensure the collection and payload indexes exist."""

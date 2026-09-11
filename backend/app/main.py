@@ -25,12 +25,20 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan context for startup and shutdown procedures."""
     logger.info("Starting up Inquira API...")
-    try:
-        await init_db()
-    except Exception as e:
-        logger.warning(f"Database initialization warning: {e}")
+    import asyncio
+    
+    async def safe_init_db():
+        try:
+            logger.info("Initializing database schema asynchronously...")
+            await init_db()
+            logger.info("Database schema ready.")
+        except Exception as e:
+            logger.warning(f"Database initialization warning: {e}")
+
+    asyncio.create_task(safe_init_db())
     yield
     logger.info("Shutting down Inquira API...")
+
 
 
 def create_application() -> FastAPI:

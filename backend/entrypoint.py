@@ -13,6 +13,10 @@ try:
     from app.config import settings
     print(f"Settings loaded: {settings.PROJECT_NAME} ({settings.ENVIRONMENT})", flush=True)
     
+    print("Importing FastAPI core...", flush=True)
+    from app.core.database import init_db
+    print("Importing API router...", flush=True)
+    from app.api.v1.router import api_router
     print("Importing FastAPI application...", flush=True)
     from app.main import app
     print("FastAPI app imported successfully!", flush=True)
@@ -20,6 +24,7 @@ except Exception as e:
     print(f"!!! CRITICAL STARTUP ERROR: {e} !!!", flush=True)
     traceback.print_exc()
     sys.exit(1)
+
 
 if __name__ == "__main__":
     import uvicorn
