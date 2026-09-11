@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Database,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   ApiClient,
@@ -40,57 +41,106 @@ export default function InquiraDashboard() {
   const [uploadStatusText, setUploadStatusText] = useState("");
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [newKbName, setNewKbName] = useState("");
+  const [newKbDesc, setNewKbDesc] = useState("");
   const [showNewKbModal, setShowNewKbModal] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [pipelineStage, setPipelineStage] = useState<string>("");
+  const [isConnected, setIsConnected] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mock initial demo data if backend offline
+  // Initialize and connect to backend on mount
   useEffect(() => {
-    const demoKb: KnowledgeBase = {
-      id: "demo-kb-001",
-      name: "Engineering & Architecture",
-      description: "Inquira Hybrid Retrieval & LangGraph system design specs",
-      document_count: 2,
-      created_at: new Date().toISOString(),
-    };
-    setKbs([demoKb]);
-    setSelectedKb(demoKb);
+    async function init() {
+      try {
+        await ApiClient.ensureAuth();
+        setIsConnected(true);
 
-    setDocuments([
-      {
-        id: "doc-001",
-        file_name: "inquira_system_architecture.pdf",
-        file_type: "pdf",
-        file_size_bytes: 2450000,
-        status: "INDEXED",
-        chunk_count: 38,
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: "doc-002",
-        file_name: "hybrid_retrieval_benchmarks.pdf",
-        file_type: "pdf",
-        file_size_bytes: 1820000,
-        status: "INDEXED",
-        chunk_count: 24,
-        created_at: new Date().toISOString(),
-      },
-    ]);
+        // Fetch Knowledge Bases
+        let userKbs = await ApiClient.getKnowledgeBases();
+        if (!userKbs || userKbs.length === 0) {
+          // Create default KB if user has none
+          const defaultKb = await ApiClient.createKnowledgeBase(
+            "Default Knowledge Base",
+            "General document workspace"
+          );
+          userKbs = [defaultKb];
+        }
 
-    setMessages([
-      {
-        id: "msg-welcome",
-        role: "assistant",
-        content:
-          "Welcome to **Inquira**. I am your Agentic RAG assistant with 5-technique hybrid retrieval and automated citation verification. Ask any question regarding your private knowledge base!",
-      },
-    ]);
+        setKbs(userKbs);
+        const active = userKbs[0];
+        setSelectedKb(active);
+
+        // Create initial Chat Session
+        const session = await ApiClient.createChatSession(active.id, "Main Chat");
+        setSessionId(session.id);
+
+        // Fetch Documents
+        const docs = await ApiClient.getDocuments(active.id);
+        setDocuments(docs || []);
+
+        setMessages([
+          {
+            id: "msg-welcome",
+            role: "assistant",
+            content:
+              "Welcome to **Inquira**. I am connected to your live Agentic RAG engine with 5-technique hybrid retrieval and citation verification. Ask any question about your documents!",
+          },
+        ]);
+      } catch (err) {
+        console.error("Initialization error:", err);
+        // Fallback demo state if backend connection fails
+        const demoKb: KnowledgeBase = {
+          id: "demo-kb-001",
+          name: "Architecture & Specs",
+          description: "System documentation",
+          document_count: 0,
+          created_at: new Date().toISOString(),
+        };
+        setKbs([demoKb]);
+        setSelectedKb(demoKb);
+        setMessages([
+          {
+            id: "msg-welcome",
+            role: "assistant",
+            content:
+              "Welcome to **Inquira**. Connecting to the live engine...",
+          },
+        ]);
+      }
+    }
+
+    init();
   }, []);
 
+  // When selected Knowledge Base changes
+  useEffect(() => {
+    if (!selectedKb) return;
+
+    async function switchKb() {
+      try {
+        const docs = await ApiClient.getDocuments(selectedKb!.id);
+        setDocuments(docs || []);
+
+        const session = await ApiClient.createChatSession(selectedKb!.id, "Chat Session");
+        setSessionId(session.id);
+      } catch (e) {
+        console.warn("Could not switch KB session:", e);
+      }
+    }
+
+    if (isConnected) {
+      switchKb();
+    }
+  }, [selectedKb, isConnected]);
+
+  // Scroll to bottom of chat on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, pipelineStage]);
 
+  // Send message to real backend with SSE streaming
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || isLoading) return;
@@ -106,94 +156,135 @@ export default function InquiraDashboard() {
       { id: assistantMsgId, role: "assistant", content: "" },
     ]);
     setIsLoading(true);
+    setPipelineStage("Planning retrieval...");
 
     try {
-      // Simulate real-time SSE streaming responses with verifiable citation markers
-      const sampleResponse =
-        `Inquira utilizes a **5-technique hybrid retrieval pipeline** combining HyDE query expansion, Qdrant dense vector search, BM25 sparse lexical search, Reciprocal Rank Fusion (RRF with \\$k=60\\$), and Cross-Encoder re-ranking [Doc: inquira_system_architecture.pdf, Page: 1, Chunk: 0].\n\n` +
-        `Empirical evaluation over a 200-query benchmark demonstrated an **approximately 18% improvement in Precision@5** over dense-only baselines [Doc: hybrid_retrieval_benchmarks.pdf, Page: 2, Chunk: 4]. All answers are validated through our Stage 3 Citation Verifier reflection loop to eliminate hallucinations.`;
-
-      const words = sampleResponse.split(" ");
-      let accumulated = "";
-
-      for (let i = 0; i < words.length; i++) {
-        accumulated += words[i] + " ";
-        await new Promise((r) => setTimeout(r, 35));
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMsgId ? { ...msg, content: accumulated } : msg
-          )
-        );
+      // Ensure we have a valid session ID
+      let currentSessionId = sessionId;
+      if (!currentSessionId && selectedKb) {
+        const newSession = await ApiClient.createChatSession(selectedKb.id, "Chat");
+        currentSessionId = newSession.id;
+        setSessionId(newSession.id);
       }
 
-      const citations: Citation[] = [
-        {
-          document_name: "inquira_system_architecture.pdf",
-          page_number: 1,
-          chunk_index: 0,
-          content:
-            "Inquira hybrid retrieval pipeline comprises HyDE, Qdrant dense search, BM25 lexical search, RRF score fusion, and Cross-Encoder re-ranking.",
-          relevance_score: 0.96,
-        },
-        {
-          document_name: "hybrid_retrieval_benchmarks.pdf",
-          page_number: 2,
-          chunk_index: 4,
-          content:
-            "Evaluation across a 200-query test set achieved Precision@5 improvement of approximately 18.2% and Faithfulness of 0.94.",
-          relevance_score: 0.91,
-        },
-      ];
+      if (!currentSessionId) {
+        throw new Error("No active chat session. Please select a knowledge base.");
+      }
 
+      let accumulatedText = "";
+
+      await ApiClient.streamChatQuery(
+        currentSessionId,
+        userQ,
+        (token: string) => {
+          accumulatedText += token;
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId ? { ...msg, content: accumulatedText } : msg
+            )
+          );
+        },
+        (stage: string, message: string) => {
+          setPipelineStage(message || stage);
+        },
+        (score: number, citations: Citation[]) => {
+          setPipelineStage("");
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId
+                ? { ...msg, content: accumulatedText.trim(), citations }
+                : msg
+            )
+          );
+        },
+        (errorMsg: string) => {
+          setPipelineStage("");
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId
+                ? {
+                    ...msg,
+                    content: accumulatedText.trim() || `Error: ${errorMsg}`,
+                  }
+                : msg
+            )
+          );
+        }
+      );
+    } catch (err: any) {
+      console.error("Query error:", err);
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === assistantMsgId
-            ? { ...msg, content: accumulated.trim(), citations }
+            ? {
+                ...msg,
+                content:
+                  msg.content || `Could not complete query: ${err.message || "Server error"}`,
+              }
             : msg
         )
       );
-    } catch (err) {
-      console.error("Query error:", err);
     } finally {
       setIsLoading(false);
+      setPipelineStage("");
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload document to real backend
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0) return;
+    if (!files || files.length === 0 || !selectedKb) return;
 
     setIsUploading(true);
-    setUploadProgress(10);
-    setUploadStatusText("Uploading & parsing document...");
+    setUploadProgress(20);
+    setUploadStatusText("Uploading document to knowledge base...");
 
-    setTimeout(() => {
-      setUploadProgress(40);
-      setUploadStatusText("Generating dense & sparse embeddings...");
-    }, 600);
+    try {
+      setUploadProgress(50);
+      setUploadStatusText("Processing chunks and generating embeddings...");
+      
+      await ApiClient.uploadDocuments(selectedKb.id, files);
 
-    setTimeout(() => {
-      setUploadProgress(80);
-      setUploadStatusText("Upserting vectors into Qdrant...");
-    }, 1200);
+      setUploadProgress(90);
+      setUploadStatusText("Upserting vectors into Qdrant Cloud...");
 
-    setTimeout(() => {
+      // Refresh real documents list
+      const updatedDocs = await ApiClient.getDocuments(selectedKb.id);
+      setDocuments(updatedDocs || []);
+
       setUploadProgress(100);
-      setUploadStatusText("Indexing complete!");
+      setUploadStatusText("Ingestion complete!");
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setUploadStatusText("");
+      }, 1200);
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      setUploadStatusText(`Upload error: ${err.message}`);
+      setTimeout(() => setIsUploading(false), 3000);
+    }
 
-      const newDoc: DocumentItem = {
-        id: `doc-${Date.now()}`,
-        file_name: files[0].name,
-        file_type: files[0].name.split(".").pop() || "txt",
-        file_size_bytes: files[0].size,
-        status: "INDEXED",
-        chunk_count: 16,
-        created_at: new Date().toISOString(),
-      };
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
-      setDocuments((prev) => [newDoc, ...prev]);
-      setIsUploading(false);
-    }, 1800);
+  // Create new Knowledge Base
+  const handleCreateKb = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newKbName.trim()) return;
+
+    try {
+      const newKb = await ApiClient.createKnowledgeBase(newKbName, newKbDesc);
+      setKbs((prev) => [...prev, newKb]);
+      setSelectedKb(newKb);
+      setShowNewKbModal(false);
+      setNewKbName("");
+      setNewKbDesc("");
+    } catch (err: any) {
+      alert(`Could not create knowledge base: ${err.message}`);
+    }
   };
 
   return (
@@ -210,9 +301,12 @@ export default function InquiraDashboard() {
               <h1 className="font-bold text-lg tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
                 Inquira
               </h1>
-              <span className="text-xs text-blue-400 font-medium tracking-wide">
-                Agentic RAG Engine
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-blue-400 font-medium tracking-wide">
+                  Agentic RAG Engine
+                </span>
+                <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? "bg-emerald-400" : "bg-amber-400"}`} />
+              </div>
             </div>
           </div>
 
@@ -224,7 +318,7 @@ export default function InquiraDashboard() {
               </span>
               <button
                 onClick={() => setShowNewKbModal(true)}
-                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-medium cursor-pointer"
               >
                 <Plus className="h-3.5 w-3.5" /> New
               </button>
@@ -244,100 +338,103 @@ export default function InquiraDashboard() {
                     <BookOpen className="h-4 w-4 text-blue-400 shrink-0" />
                     <span className="truncate font-medium">{kb.name}</span>
                   </div>
-                  <span className="text-xs bg-slate-800 px-2 py-0.5 rounded-full text-slate-400">
-                    {kb.document_count}
-                  </span>
+                  <ChevronRight className="h-3.5 w-3.5 opacity-50 shrink-0" />
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Pipeline Features Badge */}
-          <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" />
-              Hybrid 5-Pipeline Active
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-400">
-              <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                ✓ HyDE
+          {/* Pipeline Features Overview */}
+          <div className="px-2 pt-2 border-t border-slate-800/60">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-2">
+              Retrieval Capabilities
+            </span>
+            <div className="space-y-2 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <Layers className="h-3.5 w-3.5 text-indigo-400" />
+                <span>HyDE Query Expansion</span>
               </div>
-              <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                ✓ Qdrant Dense
+              <div className="flex items-center gap-2">
+                <Database className="h-3.5 w-3.5 text-blue-400" />
+                <span>Dense + BM25 Sparse Search</span>
               </div>
-              <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                ✓ BM25 Lexical
+              <div className="flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-cyan-400" />
+                <span>Reciprocal Rank Fusion (RRF)</span>
               </div>
-              <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                ✓ RRF Fusion (k=60)
-              </div>
-              <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800 col-span-2">
-                ✓ Cross-Encoder Re-ranker
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                <span>Automated Citation Verifier</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* System Status Footer */}
-        <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 px-2">
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span>LangGraph Online</span>
-          </div>
-          <span className="text-[10px] text-slate-500 font-mono">v1.0.0</span>
+        {/* User / Session Footer */}
+        <div className="pt-4 border-t border-slate-800 text-xs text-slate-500 flex items-center justify-between px-2">
+          <span>Engine Status</span>
+          <span className="flex items-center gap-1.5 text-emerald-400">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            Online
+          </span>
         </div>
       </aside>
 
-      {/* Main Content Area: Documents & Chat */}
-      <main className="flex-1 flex flex-col h-full bg-slate-950 relative">
-        {/* Top Navigation Bar */}
-        <header className="h-16 border-b border-slate-800/80 px-6 flex items-center justify-between bg-slate-900/30 backdrop-blur-sm">
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col h-full bg-slate-950">
+        {/* Top Navbar */}
+        <header className="h-16 border-b border-slate-800/80 px-6 flex items-center justify-between bg-slate-900/30 backdrop-blur">
           <div className="flex items-center gap-3">
-            <Database className="h-5 w-5 text-blue-400" />
+            <BookOpen className="h-5 w-5 text-blue-400" />
             <div>
               <h2 className="font-semibold text-sm text-slate-200">
-                {selectedKb?.name || "Select a Knowledge Base"}
+                {selectedKb?.name || "Knowledge Base"}
               </h2>
-              <p className="text-xs text-slate-400">{selectedKb?.description}</p>
+              <p className="text-xs text-slate-500">
+                {documents.length} document{documents.length === 1 ? "" : "s"} indexed in Qdrant
+              </p>
             </div>
           </div>
 
-          {/* Quick Upload Action */}
           <div className="flex items-center gap-3">
-            <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-blue-600/20">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              className="hidden"
+              multiple
+              accept=".pdf,.txt,.docx,.md"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading || !selectedKb}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium flex items-center gap-2 transition-all shadow-md shadow-blue-600/20 cursor-pointer"
+            >
               <UploadCloud className="h-4 w-4" />
               Upload Documents
-              <input
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-            </label>
+            </button>
           </div>
         </header>
 
-        {/* Ingestion Progress Banner */}
+        {/* Upload Progress Banner */}
         {isUploading && (
-          <div className="bg-blue-950/70 border-b border-blue-800/50 px-6 py-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-4 w-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin"></div>
-              <span className="text-xs text-blue-200 font-medium">
-                {uploadStatusText}
-              </span>
+          <div className="bg-blue-950/40 border-b border-blue-900/50 px-6 py-2.5 flex items-center justify-between text-xs text-blue-300">
+            <div className="flex items-center gap-2.5">
+              <Clock className="h-4 w-4 animate-spin text-blue-400" />
+              <span>{uploadStatusText}</span>
             </div>
-            <div className="w-48 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+            <div className="w-32 bg-blue-950 rounded-full h-1.5 overflow-hidden border border-blue-800">
               <div
-                className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                className="bg-blue-500 h-full transition-all duration-300"
                 style={{ width: `${uploadProgress}%` }}
-              ></div>
+              />
             </div>
           </div>
         )}
 
-        {/* Dual Pane: Chat & Document Manager */}
+        {/* Chat & Document Split Layout */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Left/Center Pane: Chat Stream */}
+          {/* Chat Column */}
           <div className="flex-1 flex flex-col justify-between overflow-hidden">
             {/* Messages Scroll Area */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -349,35 +446,33 @@ export default function InquiraDashboard() {
                   }`}
                 >
                   <div
-                    className={`max-w-2xl rounded-2xl p-4 shadow-sm text-sm leading-relaxed ${
+                    className={`max-w-2xl rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                       msg.role === "user"
-                        ? "bg-blue-600 text-white rounded-br-none"
-                        : "bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none"
+                        ? "bg-blue-600 text-white rounded-br-none shadow-md shadow-blue-600/10"
+                        : "bg-slate-900/80 border border-slate-800 text-slate-200 rounded-bl-none"
                     }`}
                   >
                     <div className="whitespace-pre-wrap">{msg.content}</div>
 
-                    {/* Citations Badges */}
+                    {/* Citations badges if present */}
                     {msg.citations && msg.citations.length > 0 && (
-                      <div className="mt-3.5 pt-3 border-t border-slate-800/80">
-                        <div className="text-[11px] font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                          Grounded Citations ({msg.citations.length}):
-                        </div>
+                      <div className="mt-3 pt-3 border-t border-slate-800/80">
+                        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                          Verified Citations ({msg.citations.length})
+                        </span>
                         <div className="flex flex-wrap gap-1.5">
-                          {msg.citations.map((c, i) => (
+                          {msg.citations.map((c, idx) => (
                             <button
-                              key={i}
+                              key={idx}
                               onClick={() => setActiveCitation(c)}
-                              className="text-[11px] bg-slate-800/90 hover:bg-slate-700 text-blue-300 border border-slate-700/80 px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5"
+                              className="text-[11px] bg-slate-800 hover:bg-slate-700/80 text-blue-300 border border-slate-700/60 rounded px-2 py-0.5 transition-colors flex items-center gap-1 cursor-pointer"
                             >
-                              <FileText className="h-3 w-3 text-slate-400" />
-                              <span className="font-mono">
-                                {c.document_name} : p.{c.page_number}
+                              <span>
+                                [{c.document_name}
+                                {c.page_number ? ` p.${c.page_number}` : ""}]
                               </span>
-                              <span className="text-[10px] bg-emerald-950 text-emerald-400 px-1 rounded">
-                                {Math.round((c.relevance_score || 0.9) * 100)}%
-                              </span>
+                              <ExternalLink className="h-2.5 w-2.5 opacity-60" />
                             </button>
                           ))}
                         </div>
@@ -386,26 +481,36 @@ export default function InquiraDashboard() {
                   </div>
                 </div>
               ))}
+
+              {/* Streaming Pipeline Stage Indicator */}
+              {isLoading && pipelineStage && (
+                <div className="flex items-center gap-2 text-xs text-blue-400 bg-blue-950/20 border border-blue-900/30 rounded-lg p-2.5 w-fit animate-pulse">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>{pipelineStage}</span>
+                </div>
+              )}
+
               <div ref={chatEndRef} />
             </div>
 
-            {/* Chat Input Bar */}
-            <div className="p-4 border-t border-slate-800/80 bg-slate-900/40">
+            {/* Input Bar */}
+            <div className="p-4 border-t border-slate-800/80 bg-slate-900/20">
               <form
                 onSubmit={handleSendMessage}
-                className="max-w-4xl mx-auto flex items-center gap-2 bg-slate-900 border border-slate-700/80 rounded-xl p-1.5 pl-4 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-lg"
+                className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1.5 focus-within:border-blue-500/50 transition-all shadow-lg"
               >
                 <input
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Ask a question about your knowledge base documents..."
-                  className="flex-1 bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
+                  placeholder={`Ask questions against "${selectedKb?.name || "your knowledge base"}"...`}
+                  disabled={isLoading}
+                  className="flex-1 bg-transparent px-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
                 />
                 <button
                   type="submit"
-                  disabled={!query.trim() || isLoading}
-                  className="h-9 w-9 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white rounded-lg flex items-center justify-center transition-all shadow-md shadow-blue-600/20"
+                  disabled={isLoading || !query.trim()}
+                  className="h-8 w-8 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg flex items-center justify-center transition-all cursor-pointer"
                 >
                   <Send className="h-4 w-4" />
                 </button>
@@ -413,30 +518,33 @@ export default function InquiraDashboard() {
             </div>
           </div>
 
-          {/* Right Pane: Document Explorer & Citation Inspector */}
-          <div className="w-80 border-l border-slate-800/80 bg-slate-900/40 p-4 flex flex-col justify-between overflow-y-auto">
+          {/* Right Column: Source Inspector & Document Details */}
+          <div className="w-80 border-l border-slate-800 bg-slate-900/40 p-4 flex flex-col justify-between overflow-y-auto">
             <div>
-              {/* Citation Details Card */}
+              {/* Active Citation Card */}
               {activeCitation ? (
-                <div className="bg-slate-900 border border-blue-500/50 rounded-xl p-4 mb-6 shadow-xl relative">
+                <div className="bg-slate-900 border border-blue-500/40 rounded-xl p-3.5 mb-4 shadow-lg">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <FileText className="h-3.5 w-3.5" /> Source Inspector
+                    <span className="text-xs font-semibold text-blue-400 flex items-center gap-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                      Citation Source
                     </span>
                     <button
                       onClick={() => setActiveCitation(null)}
-                      className="text-slate-500 hover:text-slate-300 text-xs"
+                      className="text-slate-500 hover:text-slate-400"
                     >
-                      ✕
+                      <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <h4 className="font-medium text-xs text-slate-200 truncate mb-1">
-                    {activeCitation.document_name}
-                  </h4>
-                  <div className="flex items-center gap-2 text-[11px] text-slate-400 mb-2">
-                    <span>Page {activeCitation.page_number}</span>
-                    <span>•</span>
-                    <span>Chunk #{activeCitation.chunk_index}</span>
+                  <div className="text-xs text-slate-400 mb-2">
+                    <span className="font-medium text-slate-200">
+                      {activeCitation.document_name}
+                    </span>
+                    {activeCitation.page_number && (
+                      <span className="ml-1.5 text-blue-400">
+                        Page {activeCitation.page_number}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-300 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 font-mono text-[11px] leading-relaxed">
                     "{activeCitation.content}"
@@ -449,33 +557,41 @@ export default function InquiraDashboard() {
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-1 mb-3 block">
                   Indexed Files ({documents.length})
                 </span>
-                <div className="space-y-2">
-                  {documents.map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="bg-slate-900/90 border border-slate-800 rounded-lg p-3 hover:border-slate-700 transition-all"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2 truncate">
-                          <FileText className="h-4 w-4 text-blue-400 shrink-0" />
-                          <span className="text-xs font-medium text-slate-200 truncate">
-                            {doc.file_name}
+                {documents.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                    No documents uploaded yet.
+                    <br />
+                    Click "Upload Documents" above.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {documents.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="bg-slate-900/90 border border-slate-800 rounded-lg p-3 hover:border-slate-700 transition-all"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2 truncate">
+                            <FileText className="h-4 w-4 text-blue-400 shrink-0" />
+                            <span className="text-xs font-medium text-slate-200 truncate">
+                              {doc.file_name}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                          <span>{doc.chunk_count || 0} chunks</span>
+                          <span className="flex items-center gap-1 text-emerald-400">
+                            <CheckCircle2 className="h-3 w-3" /> {doc.status}
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-center justify-between text-[11px] text-slate-500">
-                        <span>{doc.chunk_count} chunks</span>
-                        <span className="flex items-center gap-1 text-emerald-400">
-                          <CheckCircle2 className="h-3 w-3" /> Indexed
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Evaluation Metric Quick Banner */}
+            {/* Evaluation Metric Banner */}
             <div className="bg-gradient-to-br from-blue-950/40 to-indigo-950/40 border border-blue-900/30 rounded-xl p-3 text-center">
               <span className="text-[10px] text-blue-400 uppercase tracking-wider block font-semibold mb-1">
                 Precision@5 Performance
@@ -490,6 +606,58 @@ export default function InquiraDashboard() {
           </div>
         </div>
       </main>
+
+      {/* New Knowledge Base Modal */}
+      {showNewKbModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h3 className="font-semibold text-base text-slate-100 mb-1">
+              Create Knowledge Base
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">
+              A private collection of documents with dedicated vector indices.
+            </p>
+            <form onSubmit={handleCreateKb} className="space-y-4">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newKbName}
+                  onChange={(e) => setNewKbName(e.target.value)}
+                  placeholder="e.g. Legal Contracts, Product Specs"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Description</label>
+                <textarea
+                  value={newKbDesc}
+                  onChange={(e) => setNewKbDesc(e.target.value)}
+                  placeholder="Optional description..."
+                  rows={2}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewKbModal(false)}
+                  className="px-3.5 py-1.5 text-xs text-slate-400 hover:text-slate-300 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg cursor-pointer transition-all"
+                >
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
