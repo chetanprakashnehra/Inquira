@@ -41,8 +41,9 @@ RUN mkdir -p /app/uploads /home/inquira/.cache && \
 
 USER inquira
 
-EXPOSE 8000
+EXPOSE 10000
 
-# Use gunicorn with dynamic port and memory-safe concurrency for cloud hosts (e.g. Render 512MB)
-CMD ["sh", "-c", "gunicorn app.main:app -w ${WEB_CONCURRENCY:-1} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8000} --access-logfile - --error-logfile -"]
+# Use gunicorn with dynamic port, 120s timeout for ML/DB cold starts, and memory-safe concurrency
+CMD ["sh", "-c", "gunicorn app.main:app -w ${WEB_CONCURRENCY:-1} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-10000} --timeout 120 --access-logfile - --error-logfile -"]
+
 
