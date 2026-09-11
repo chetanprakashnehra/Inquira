@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    USE_CELERY: bool = False
 
     # Qdrant Vector Store
     QDRANT_URL: str = "http://localhost:6333"
@@ -93,6 +94,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_production_security(self) -> 'Settings':
+        if self.CELERY_BROKER_URL == "redis://localhost:6379/0" and self.REDIS_URL != "redis://localhost:6379/0":
+            self.CELERY_BROKER_URL = self.REDIS_URL
+        if self.CELERY_RESULT_BACKEND == "redis://localhost:6379/0" and self.REDIS_URL != "redis://localhost:6379/0":
+            self.CELERY_RESULT_BACKEND = self.REDIS_URL
+
         if self.ENVIRONMENT == 'production':
             if self.JWT_SECRET_KEY == "supersecretjwtkeychangeinproduction1234567890abcdef":
                 raise ValueError("JWT_SECRET_KEY must be changed in production")

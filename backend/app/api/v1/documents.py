@@ -100,22 +100,31 @@ async def upload_documents(
     for doc in created_docs:
         await db.refresh(doc)
 
-    # Dispatch Celery tasks or fallback to background tasks if Celery not connected
-    from app.workers.tasks import process_document
-    for doc_id_str in doc_ids_to_process:
-        try:
-            process_document.delay(doc_id_str)
+    # Dispatch document processing asynchronously
+    from app.workers.tasks import _async_process_document
 
+    class LocalTaskRunner:
+        class Request:
+            retries = 0
+        request = Request()
+        max_retries = 1
+        def retry(self, exc=None): pass
+
+    local_runner = LocalTaskRunner()
+
+    if getattr(settings, "USE_CELERY", False):
+        try:
+            from app.workers.tasks import process_document
+            for doc_id_str in doc_ids_to_process:
+                process_document.delay(doc_id_str)
         except Exception as e:
             logger.warning(f"Could not dispatch to Celery broker ({e}). Running via FastAPI BackgroundTasks.")
-            from app.workers.tasks import _async_process_document
-            
-            class DummyTask:
-                request = type("obj", (object,), {"retries": 0})
-                max_retries = 1
-                def retry(self, exc): pass
-
-            background_tasks.add_task(_async_process_document, DummyTask(), doc_id_str)
+            for doc_id_str in doc_ids_to_process:
+                background_tasks.add_task(_async_process_document, local_runner, doc_id_str)
+    else:
+        # Standalone / Cloud Native background execution
+        for doc_id_str in doc_ids_to_process:
+            background_tasks.add_task(_async_process_document, local_runner, doc_id_str)
 
     return DocumentUploadResponse(
         message=f"Successfully queued {len(created_docs)} documents for ingestion.",

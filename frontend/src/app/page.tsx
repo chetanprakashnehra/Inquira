@@ -230,39 +230,61 @@ export default function InquiraDashboard() {
     }
   };
 
-  // Upload document to real backend
+  // Upload document to real backend with live ingestion polling
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0 || !selectedKb) return;
 
     setIsUploading(true);
-    setUploadProgress(20);
-    setUploadStatusText("Uploading document to knowledge base...");
+    setUploadProgress(25);
+    setUploadStatusText(`Uploading ${files.length} document(s) to knowledge base...`);
 
     try {
+      const uploadRes = await ApiClient.uploadDocuments(selectedKb.id, files);
       setUploadProgress(50);
-      setUploadStatusText("Processing chunks and generating embeddings...");
-      
-      await ApiClient.uploadDocuments(selectedKb.id, files);
+      setUploadStatusText("Processing, chunking, and embedding vectors...");
 
-      setUploadProgress(90);
-      setUploadStatusText("Upserting vectors into Qdrant Cloud...");
+      // Poll document status for up to 20 seconds
+      let attempts = 0;
+      let completed = false;
 
-      // Refresh real documents list
-      const updatedDocs = await ApiClient.getDocuments(selectedKb.id);
-      setDocuments(updatedDocs || []);
+      while (attempts < 12 && !completed) {
+        await new Promise((r) => setTimeout(r, 1500));
+        attempts++;
 
-      setUploadProgress(100);
-      setUploadStatusText("Ingestion complete!");
+        const currentDocs = await ApiClient.getDocuments(selectedKb.id);
+        setDocuments(currentDocs || []);
+
+        const pending = currentDocs.filter(
+          (d) => d.status === "PENDING" || d.status === "PROCESSING"
+        );
+
+        if (pending.length === 0 && currentDocs.length > 0) {
+          completed = true;
+          setUploadProgress(100);
+          setUploadStatusText("Ingestion complete! Vectors indexed in Qdrant.");
+        } else {
+          setUploadProgress(Math.min(90, 50 + attempts * 4));
+          setUploadStatusText("Generating embeddings & upserting into Qdrant Cloud...");
+        }
+      }
+
+      if (!completed) {
+        const finalDocs = await ApiClient.getDocuments(selectedKb.id);
+        setDocuments(finalDocs || []);
+        setUploadProgress(100);
+        setUploadStatusText("Documents queued and indexing in progress.");
+      }
+
       setTimeout(() => {
         setIsUploading(false);
         setUploadProgress(0);
         setUploadStatusText("");
-      }, 1200);
+      }, 1500);
     } catch (err: any) {
       console.error("Upload error:", err);
       setUploadStatusText(`Upload error: ${err.message}`);
-      setTimeout(() => setIsUploading(false), 3000);
+      setTimeout(() => setIsUploading(false), 3500);
     }
 
     if (fileInputRef.current) {

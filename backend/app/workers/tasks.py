@@ -52,33 +52,39 @@ async def _async_process_document(task, document_id_str: str):
             return {"status": "error", "message": "Document not found"}
 
         doc, user_id = row
+        doc_id = doc.id
+        doc_file_path = doc.file_path
+        doc_file_type = doc.file_type
+        doc_file_name = doc.file_name
+        doc_kb_id = doc.knowledge_base_id
+        user_id_str = str(user_id)
 
         try:
             # Update status to PROCESSING
-            doc.status = "PROCESSING"
+            await db.execute(
+                update(Document).where(Document.id == doc_uuid).values(status="PROCESSING")
+            )
             await db.commit()
             await publish_progress(channel, {"status": "PROCESSING", "progress": 10, "message": "Starting document parsing..."})
 
-            # 2. Parse file into pages
-            await publish_progress(channel, {"status": "PROCESSING", "progress": 25, "message": "Extracting text from pages..."})
-            pages = DocumentParser.parse_file(doc.file_path, doc.file_type)
+            # 2. Parse, chunk, and embed in background thread to never block async loop
+            await publish_progress(channel, {"status": "PROCESSING", "progress": 25, "message": "Extracting text and chunking..."})
 
-            # 3. Chunk parsed content
-            await publish_progress(channel, {"status": "PROCESSING", "progress": 45, "message": "Splitting text into semantic chunks..."})
-            chunker = DocumentChunker()
-            chunks = chunker.chunk_pages(pages)
+            def _parse_and_embed():
+                pages = DocumentParser.parse_file(doc_file_path, doc_file_type)
+                chunker = DocumentChunker()
+                chunks = chunker.chunk_pages(pages)
+                if not chunks:
+                    raise ValueError("No extractable text or chunks produced from document.")
+                chunk_texts = [c.content for c in chunks]
+                dense = embedding_service.get_dense_embeddings(chunk_texts)
+                sparse = embedding_service.get_sparse_embeddings(chunk_texts)
+                return chunks, dense, sparse
 
-            if not chunks:
-                raise ValueError("No extractable chunks produced from document.")
+            chunks, dense_vectors, sparse_vectors = await asyncio.to_thread(_parse_and_embed)
 
-            # 4. Generate Embeddings (Dense & Sparse)
-            await publish_progress(channel, {"status": "PROCESSING", "progress": 65, "message": "Generating dense and sparse embeddings..."})
-            chunk_texts = [c.content for c in chunks]
-            dense_vectors = embedding_service.get_dense_embeddings(chunk_texts)
-            sparse_vectors = embedding_service.get_sparse_embeddings(chunk_texts)
-
-            # 5. Prepare Qdrant points and DB records
-            await publish_progress(channel, {"status": "PROCESSING", "progress": 85, "message": "Indexing into Qdrant vector database..."})
+            # 3. Prepare Qdrant points and DB records
+            await publish_progress(channel, {"status": "PROCESSING", "progress": 70, "message": "Indexing vectors into Qdrant Cloud..."})
             point_ids = []
             payloads = []
             db_chunks = []
@@ -87,17 +93,17 @@ async def _async_process_document(task, document_id_str: str):
                 point_id = str(uuid.uuid4())
                 point_ids.append(point_id)
                 payloads.append({
-                    "user_id": str(user_id),
-                    "knowledge_base_id": str(doc.knowledge_base_id),
-                    "document_id": str(doc.id),
-                    "file_name": doc.file_name,
+                    "user_id": user_id_str,
+                    "knowledge_base_id": str(doc_kb_id),
+                    "document_id": str(doc_id),
+                    "file_name": doc_file_name,
                     "page_number": chunk.page_number,
                     "chunk_index": chunk.chunk_index,
                     "content": chunk.content
                 })
                 db_chunks.append(
                     DocumentChunk(
-                        document_id=doc.id,
+                        document_id=doc_id,
                         chunk_index=chunk.chunk_index,
                         page_number=chunk.page_number,
                         content=chunk.content,
@@ -106,19 +112,22 @@ async def _async_process_document(task, document_id_str: str):
                     )
                 )
 
-            # Upsert into Qdrant
-            qdrant_store.upsert_chunks(
+            # Upsert into Qdrant via thread to prevent event loop blocking
+            await asyncio.to_thread(
+                qdrant_store.upsert_chunks,
                 point_ids=point_ids,
                 dense_vectors=dense_vectors,
                 sparse_vectors=sparse_vectors,
                 payloads=payloads
             )
 
-            # Insert chunks into relational DB
+            # Insert chunks into relational DB and mark INDEXED
             db.add_all(db_chunks)
-            doc.status = "INDEXED"
-            doc.chunk_count = len(chunks)
-            doc.error_message = None
+            await db.execute(
+                update(Document)
+                .where(Document.id == doc_uuid)
+                .values(status="INDEXED", chunk_count=len(chunks), error_message=None)
+            )
             await db.commit()
 
             await publish_progress(channel, {
@@ -131,15 +140,18 @@ async def _async_process_document(task, document_id_str: str):
 
         except Exception as exc:
             logger.error(f"Error processing document {document_id_str}: {exc}", exc_info=True)
-            doc.status = "FAILED"
-            doc.error_message = str(exc)
+            await db.execute(
+                update(Document)
+                .where(Document.id == doc_uuid)
+                .values(status="FAILED", error_message=str(exc))
+            )
             
             # Record in application_logs
             app_log = ApplicationLog(
                 level="ERROR",
                 source="celery.tasks.process_document",
-                message=f"Failed to process document {doc.file_name}: {str(exc)}",
-                metadata_json={"document_id": document_id_str, "file_path": doc.file_path}
+                message=f"Failed to process document {doc_file_name}: {str(exc)}",
+                metadata_json={"document_id": document_id_str, "file_path": doc_file_path}
             )
             db.add(app_log)
             await db.commit()
@@ -151,9 +163,10 @@ async def _async_process_document(task, document_id_str: str):
                 "message": "Document indexing failed."
             })
 
-            # Check if task should retry
-            if task.request.retries < task.max_retries:
-                raise task.retry(exc=exc)
+            # Check if task should retry (only for actual Celery tasks)
+            if hasattr(task, "request") and getattr(task.request, "retries", 0) < getattr(task, "max_retries", 0):
+                if hasattr(task, "retry"):
+                    raise task.retry(exc=exc)
             return {"status": "failed", "error": str(exc)}
 
 
