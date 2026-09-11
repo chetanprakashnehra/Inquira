@@ -31,6 +31,8 @@ RUN addgroup --system --gid 1001 inquira && \
 
 ENV HOME=/home/inquira
 ENV HF_HOME=/home/inquira/.cache
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 # Copy application source
 COPY . .
@@ -43,7 +45,7 @@ USER inquira
 
 EXPOSE 10000
 
-# Use gunicorn with dynamic port, 120s timeout for ML/DB cold starts, and memory-safe concurrency
-CMD ["sh", "-c", "gunicorn app.main:app -w ${WEB_CONCURRENCY:-1} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-10000} --timeout 120 --access-logfile - --error-logfile -"]
+# Direct uvicorn startup: lightweight, no Gunicorn IPC/heartbeat overhead, dynamic port
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --log-level info"]
 
 
