@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
     PROJECT_NAME: str = "Inquira API"
-    VERSION: str = "1.0.0"
+    VERSION: str = "1.0.1"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://inquira_user:inquira_pass@localhost:5432/inquira_db"
