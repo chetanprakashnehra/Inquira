@@ -654,15 +654,24 @@ export default function Dashboard() {
         <div className="sidebar-section">
           <div className="sidebar-section-header">
             <p className="sidebar-label">ACTIVE WORKSPACE</p>
-            {selectedKBObj && (
+            <div className="sidebar-header-actions">
               <button
-                className="icon-btn-danger icon-btn-small"
-                onClick={() => handleDeleteKB(selectedKBObj.id, selectedKBObj.name)}
-                title="Delete active knowledge base"
+                className="icon-btn-sm"
+                onClick={() => setSection("create-kb")}
+                title="New knowledge base"
               >
-                <IconTrash size={14} />
+                <IconPlus size={14} />
               </button>
-            )}
+              {selectedKBObj && (
+                <button
+                  className="icon-btn-sm icon-btn-danger"
+                  onClick={() => handleDeleteKB(selectedKBObj.id, selectedKBObj.name)}
+                  title="Delete active knowledge base"
+                >
+                  <IconTrash size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
           <select
@@ -682,7 +691,7 @@ export default function Dashboard() {
             className="nav-item add-kb-btn"
             onClick={() => setSection("create-kb")}
           >
-            <IconPlus size={15} /> New knowledge base
+            <IconPlus size={14} /> New knowledge base
           </button>
         </div>
 
@@ -690,15 +699,17 @@ export default function Dashboard() {
         <div className="sidebar-section">
           <div className="sidebar-section-header">
             <p className="sidebar-label">CONVERSATIONS</p>
-            {selectedKB && (
-              <button
-                className="icon-btn-small"
-                onClick={createChatSession}
-                title="Start a new chat"
-              >
-                <IconPlus size={14} />
-              </button>
-            )}
+            <div className="sidebar-header-actions">
+              {selectedKB && (
+                <button
+                  className="icon-btn-sm"
+                  onClick={createChatSession}
+                  title="Start a new chat"
+                >
+                  <IconPlus size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="sessions-list">
@@ -722,7 +733,7 @@ export default function Dashboard() {
                   }}
                   title="Delete chat"
                 >
-                  <IconTrash size={13} />
+                  <IconTrash size={14} />
                 </button>
               </div>
             ))}
@@ -773,11 +784,11 @@ export default function Dashboard() {
                 <IconBrain size={14} /> {selectedKBObj.name}
               </span>
               <button
-                className="badge-delete-btn"
+                className="icon-btn icon-btn-danger"
                 onClick={() => handleDeleteKB(selectedKBObj.id, selectedKBObj.name)}
                 title="Delete this knowledge base"
               >
-                <IconTrash size={13} /> Delete KB
+                <IconTrash size={15} />
               </button>
             </div>
           )}
@@ -1006,7 +1017,7 @@ export default function Dashboard() {
                               <span className="kb-card-active-pill">Active</span>
                             ) : (
                               <button
-                                className="icon-btn icon-btn-small"
+                                className="secondary-button-sm"
                                 onClick={() => setSelectedKB(kb.id)}
                                 title="Set as active workspace"
                               >
@@ -1103,7 +1114,7 @@ export default function Dashboard() {
                   Cancel
                 </button>
                 <button type="submit" className="primary-button">
-                  <IconPlus size={16} /> Create Knowledge Base
+                  <IconPlus size={15} /> Create Knowledge Base
                 </button>
               </div>
             </form>
@@ -1315,8 +1326,8 @@ export default function Dashboard() {
                     </span>
                   </div>
 
-                  <button className="secondary-button" onClick={createChatSession}>
-                    <IconPlus size={14} /> New Chat
+                  <button className="primary-button" onClick={createChatSession}>
+                    <IconPlus size={15} /> New Chat
                   </button>
                 </div>
 
