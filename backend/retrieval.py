@@ -8,7 +8,6 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
 )
-from sentence_transformers import CrossEncoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -277,8 +276,11 @@ _reranker = None
 
 def get_reranker():
     global _reranker
+    if not getattr(settings, "enable_reranker", False):
+        return None
     if _reranker is None:
         try:
+            from sentence_transformers import CrossEncoder
             _reranker = CrossEncoder(
                 settings.reranker_model
             )

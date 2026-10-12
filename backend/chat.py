@@ -232,22 +232,32 @@ async def stream_chat(
     question = request.question
 
     async def event_generator():
+        # Flush initial progress event to immediately commit HTTP 200 headers to the browser
+        yield (
+            f"data: {json.dumps({'type': 'progress', 'status': 'started', 'node': 'init', 'message': 'Connecting to agent', 'retry_count': 0})}\n\n"
+        )
+
         try:
             from agent import stream_agent
+            from database import SessionLocal
 
             async for event in stream_agent(
                 question=question,
                 knowledge_base_id=knowledge_base_id,
                 history=history,
             ):
-                # Save the final answer to conversation history.
+                # Save the final answer to conversation history in an independent session.
                 if event["type"] == "result":
-                    await save_message(
-                        session_id=session_id,
-                        role="assistant",
-                        content=event["answer"],
-                        db=db,
-                    )
+                    try:
+                        async with SessionLocal() as save_db:
+                            await save_message(
+                                session_id=session_id,
+                                role="assistant",
+                                content=event["answer"],
+                                db=save_db,
+                            )
+                    except Exception as db_exc:
+                        logging.warning(f"Could not persist assistant message: {db_exc}")
 
                     event = {
                         "type": "done",
@@ -255,23 +265,23 @@ async def stream_chat(
                         "citations": make_json_safe(
                             event["citations"]
                         ),
-                        "supported": event["is_supported"],
-                        "is_supported": event["is_supported"],
-                        "retry_count": event["retry_count"],
+                        "supported": event.get("is_supported", False),
+                        "is_supported": event.get("is_supported", False),
+                        "retry_count": event.get("retry_count", 0),
                     }
 
                 yield (
                     f"data: {json.dumps(make_json_safe(event))}\n\n"
                 )
 
-        except Exception:
+        except Exception as exc:
             logging.exception("Chat streaming failed")
 
             yield (
                 "data: "
                 + json.dumps({
                     "type": "error",
-                    "message": "Unable to generate the answer.",
+                    "message": f"Unable to generate the answer: {str(exc)}",
                 })
                 + "\n\n"
             )

@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     )
 
     # Cross encoder
+    enable_reranker: bool = False
+
     reranker_model: str = (
         "cross-encoder/ms-marco-MiniLM-L-6-v2"
     )
