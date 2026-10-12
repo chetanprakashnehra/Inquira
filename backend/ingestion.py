@@ -18,6 +18,9 @@ from pypdf import PdfReader
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
     PointStruct,
     VectorParams,
 )
@@ -377,6 +380,74 @@ async def get_knowledge_bases(
     )
 
     return knowledge_bases
+
+
+# ============================================================
+# DELETE KNOWLEDGE BASE
+# ============================================================
+
+@router.delete(
+    "/{knowledge_base_id}"
+)
+async def delete_knowledge_base(
+    knowledge_base_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Verify ownership
+    result = await db.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.user_id == current_user.id,
+        )
+    )
+    knowledge_base = result.scalar_one_or_none()
+
+    if knowledge_base is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge base not found",
+        )
+
+    # 2. Delete points from Qdrant vector database
+    try:
+        qdrant_client.delete(
+            collection_name=settings.qdrant_collection_name,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="knowledge_base_id",
+                        match=MatchValue(value=str(knowledge_base_id)),
+                    )
+                ]
+            ),
+        )
+    except Exception as q_err:
+        print(f"Warning: Failed to delete Qdrant points for KB {knowledge_base_id}: {q_err}")
+
+    # 3. Clean up physical files on disk
+    docs_result = await db.execute(
+        select(Document).where(Document.knowledge_base_id == knowledge_base_id)
+    )
+    docs = docs_result.scalars().all()
+    for doc in docs:
+        if doc.file_path:
+            try:
+                p = Path(doc.file_path)
+                if p.exists() and p.is_file():
+                    p.unlink()
+            except Exception:
+                pass
+
+    # 4. Delete the Knowledge Base (SQLAlchemy cascades delete to documents, chunks, sessions, and messages)
+    await db.delete(knowledge_base)
+    await db.commit()
+
+    return {
+        "status": "success",
+        "message": "Knowledge base deleted successfully",
+        "id": str(knowledge_base_id),
+    }
 
 
 # ============================================================
@@ -1059,3 +1130,65 @@ async def stream_document_status(
             "Connection": "keep-alive",
         },
     )
+
+
+# ============================================================
+# DELETE DOCUMENT
+# ============================================================
+
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Document)
+        .join(KnowledgeBase, Document.knowledge_base_id == KnowledgeBase.id)
+        .where(
+            Document.id == document_id,
+            KnowledgeBase.user_id == current_user.id,
+        )
+    )
+    document = result.scalar_one_or_none()
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    # 1. Clean up Qdrant points for this document
+    try:
+        qdrant_client.delete(
+            collection_name=settings.qdrant_collection_name,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="document_id",
+                        match=MatchValue(value=str(document_id)),
+                    )
+                ]
+            ),
+        )
+    except Exception as q_err:
+        print(f"Warning: Failed to delete Qdrant points for document {document_id}: {q_err}")
+
+    # 2. Clean up file on disk
+    if document.file_path:
+        try:
+            p = Path(document.file_path)
+            if p.exists() and p.is_file():
+                p.unlink()
+        except Exception:
+            pass
+
+    # 3. Delete document from database (cascades to chunks)
+    await db.delete(document)
+    await db.commit()
+
+    return {
+        "status": "success",
+        "message": "Document deleted successfully",
+        "id": str(document_id),
+    }

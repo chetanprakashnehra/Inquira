@@ -109,6 +109,11 @@ class KnowledgeBase(Base):
         cascade="all, delete-orphan",
     )
 
+    chat_sessions: Mapped[list["ChatSession"]] = relationship(
+        back_populates="knowledge_base",
+        cascade="all, delete-orphan",
+    )
+
 
 # ==============================
 # Document
@@ -263,6 +268,15 @@ class ChatSession(Base):
         back_populates="chat_sessions",
     )
 
+    knowledge_base: Mapped["KnowledgeBase"] = relationship(
+        back_populates="chat_sessions",
+    )
+
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
+
 
 # ==============================
 # Chat Message
@@ -296,4 +310,8 @@ class ChatMessage(Base):
         DateTime,
         default=datetime.utcnow,
         nullable=False,
+    )
+
+    session: Mapped["ChatSession"] = relationship(
+        back_populates="messages",
     )
