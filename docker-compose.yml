@@ -66,13 +66,19 @@ services:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-inquira_user}:${POSTGRES_PASSWORD:-inquira_pass}@postgres:5432/${POSTGRES_DB:-inquira_db}
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-inquira_user}:${POSTGRES_PASSWORD:-inquira_pass}@postgres:5432/${POSTGRES_DB:-inquira_db}
+      - REDIS_URL=redis://inquira-redis:6379/0
+      - CELERY_BROKER_URL=redis://inquira-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://inquira-redis:6379/0
+      - QDRANT_URL=http://inquira-qdrant:6333
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=60
       - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    ports:
+      - "8000:8000"
     expose:
       - "8000"
     volumes:
@@ -84,19 +90,27 @@ services:
       dockerfile: Dockerfile
     container_name: inquira-celery-worker
     restart: always
-    command: celery -A app.workers.celery_app.celery worker --loglevel=info --concurrency=4
+    command: celery -A worker:celery_app worker --loglevel=info --pool=solo
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_started
+        condition: service_healthy
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-inquira_user}:${POSTGRES_PASSWORD:-inquira_pass}@postgres:5432/${POSTGRES_DB:-inquira_db}
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-inquira_user}:${POSTGRES_PASSWORD:-inquira_pass}@postgres:5432/${POSTGRES_DB:-inquira_db}
+      - REDIS_URL=redis://inquira-redis:6379/0
+      - CELERY_BROKER_URL=redis://inquira-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://inquira-redis:6379/0
+      - QDRANT_URL=http://inquira-qdrant:6333
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
     volumes:
       - backend_uploads:/app/uploads
 
@@ -109,7 +123,9 @@ services:
     depends_on:
       - backend
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - VITE_API_BASE_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
     expose:
       - "3000"
 
@@ -119,7 +135,6 @@ services:
     restart: always
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:

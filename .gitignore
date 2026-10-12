@@ -5,6 +5,7 @@
 .env.local
 .env.production
 .env.*.local
+redis&celeryapis.txt
 
 # ========================
 # Python
