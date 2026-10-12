@@ -607,9 +607,9 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="workspace-shell">
+    <div className="workspace">
       {/* Sidebar Navigation */}
-      <aside className="workspace-sidebar">
+      <aside className="sidebar">
         <div className="sidebar-brand">
           <div className="brand-logo-glow">
             <span className="brand-icon">I</span>
@@ -626,28 +626,28 @@ export default function Dashboard() {
           className={`nav-item ${section === "overview" ? "active" : ""}`}
           onClick={() => setSection("overview")}
         >
-          <IconOverview size={17} /> Overview
+          <IconOverview size={17} /> <span>Overview</span>
         </button>
 
         <button
           className={`nav-item ${section === "kbs" ? "active" : ""}`}
           onClick={() => setSection("kbs")}
         >
-          <IconDatabase size={17} /> Knowledge Bases
+          <IconDatabase size={17} /> <span>Knowledge Bases</span>
         </button>
 
         <button
           className={`nav-item ${section === "documents" ? "active" : ""}`}
           onClick={() => setSection("documents")}
         >
-          <IconDocuments size={17} /> Documents
+          <IconDocuments size={17} /> <span>Documents</span>
         </button>
 
         <button
           className={`nav-item ${section === "chat" ? "active" : ""}`}
           onClick={() => setSection("chat")}
         >
-          <IconChat size={17} /> AI Assistant
+          <IconChat size={17} /> <span>AI Assistant</span>
         </button>
 
         {/* Knowledge Base Switcher */}
