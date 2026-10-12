@@ -27,6 +27,20 @@ qdrant_client = QdrantClient(
 )
 
 
+_named_vectors_cache: bool | None = None
+
+
+def get_using_param():
+    global _named_vectors_cache
+    if _named_vectors_cache is None:
+        try:
+            col = qdrant_client.get_collection(settings.qdrant_collection_name)
+            _named_vectors_cache = isinstance(col.config.params.vectors, dict) and "dense" in col.config.params.vectors
+        except Exception:
+            _named_vectors_cache = True
+    return "dense" if _named_vectors_cache else None
+
+
 # ============================================================
 # DENSE RETRIEVAL
 # ============================================================
@@ -40,12 +54,11 @@ def dense_search(
     Search Qdrant using vector similarity.
     """
 
-    results = qdrant_client.query_points(
-        collection_name=settings.qdrant_collection_name,
-
-        query=query_vector,
-
-        query_filter=Filter(
+    using_param = get_using_param()
+    query_kwargs = {
+        "collection_name": settings.qdrant_collection_name,
+        "query": query_vector,
+        "query_filter": Filter(
             must=[
                 FieldCondition(
                     key="knowledge_base_id",
@@ -55,11 +68,13 @@ def dense_search(
                 )
             ]
         ),
+        "limit": limit,
+        "with_payload": True,
+    }
+    if using_param:
+        query_kwargs["using"] = using_param
 
-        limit=limit,
-
-        with_payload=True,
-    )
+    results = qdrant_client.query_points(**query_kwargs)
 
     return results.points
 

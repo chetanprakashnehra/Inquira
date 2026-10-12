@@ -77,6 +77,20 @@ qdrant_client = QdrantClient(
 )
 
 
+_named_vectors_cache: bool | None = None
+
+
+def get_vector_payload(vector: list[float]):
+    global _named_vectors_cache
+    if _named_vectors_cache is None:
+        try:
+            col = qdrant_client.get_collection(settings.qdrant_collection_name)
+            _named_vectors_cache = isinstance(col.config.params.vectors, dict) and "dense" in col.config.params.vectors
+        except Exception:
+            _named_vectors_cache = True
+    return {"dense": vector} if _named_vectors_cache else vector
+
+
 def ensure_qdrant_collection():
 
     collections = (
@@ -97,12 +111,12 @@ def ensure_qdrant_collection():
             collection_name=
                 settings.qdrant_collection_name,
 
-            vectors_config=VectorParams(
-
-                size=settings.dense_embedding_dim,
-
-                distance=Distance.COSINE,
-            ),
+            vectors_config={
+                "dense": VectorParams(
+                    size=settings.dense_embedding_dim,
+                    distance=Distance.COSINE,
+                )
+            },
         )
 
 
@@ -758,7 +772,9 @@ async def process_document_by_id(
 
                             id=point_id,
 
-                            vector=vector,
+                            vector=get_vector_payload(
+                                vector
+                            ),
 
                             payload={
 
